@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BP1 Loader</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: Arial, sans-serif;
+}
+
+#loader {
+    width: min(650px, 92%);
+    padding: 30px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 14px;
+}
+
+h1 {
+    margin-top: 0;
+}
+
+.description {
+    color: #8b949e;
+}
+
+label {
+    display: block;
+    margin-top: 18px;
+    margin-bottom: 7px;
+    color: #8b949e;
+    font-size: 14px;
+}
+
+input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #30363d;
+    background: #0d1117;
+    color: white;
+    font-size: 15px;
+}
+
+button {
+    width: 100%;
+    margin-top: 20px;
+    padding: 12px;
+    border: 0;
+    border-radius: 8px;
+    background: #238636;
+    color: white;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+button:disabled {
+    opacity: 0.5;
+}
+
+#status {
+    margin-top: 16px;
+    padding: 12px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    white-space: pre-wrap;
+}
+
+#website {
+    display: none;
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: white;
+}
+</style>
+</head>
+
+<body>
+
+<div id="loader">
+
+    <h1>BP1 Loader</h1>
+
+    <p class="description">
+        Load an encrypted BP1 website from a public GitHub repository.
+    </p>
+
+    <label>GitHub Repository</label>
+
+    <input
+        id="repository"
+        placeholder="https://github.com/user/repository"
+    >
+
+    <label>BP1 Key</label>
+
+    <input
+        id="key"
+        type="password"
+        placeholder="Encryption key"
+    >
+
+    <button id="loadButton">
+        Load Website
+    </button>
+
+    <div id="status">
+        Ready.
+    </div>
+
+</div>
+
+<iframe
+    id="website"
+    sandbox="allow-scripts allow-forms allow-modals allow-popups">
+</iframe>
+
+<script>
+
+const BP1_MAGIC = "BP1E";
+const BP1_VERSION = 1;
+
+const PBKDF2_ITERATIONS = 250000;
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+
+/* -----------------------------
+   GitHub
+----------------------------- */
+
+function parseRepository(url) {
+
+    const match = url
+        .trim()
+        .replace(/\/+$/, "")
+        .match(
+            /^https?:\/\/github\.com\/([^/]+)\/([^/#?]+)/
+        );
+
+    if (!match) {
+        throw new Error(
+            "Invalid GitHub repository URL."
+        );
+    }
+
+    return {
+        owner: match[1],
+        repo: match[2].replace(/\.git$/, "")
+    };
+}
+
+
+async function getRepositoryFiles(repository) {
+
+    const { owner, repo } =
+        parseRepository(repository);
+
+    const url =
+        `https://api.github.com/repos/${owner}/${repo}/git/trees/HEAD?recursive=1`;
+
+    const response = await fetch(url, {
+        headers: {
+            "Accept":
+                "application/vnd.github+json"
+        }
+    });
+
+    if (!response.ok) {
+        throw new Error(
+            "Could not access the public GitHub repository."
+        );
+    }
+
+    const data = await response.json();
+
+    return data.tree || [];
+}
+
+
+function rawURL(repository, path) {
+
+    const { owner, repo } =
+        parseRepository(repository);
+
+    const encodedPath =
+        path
+            .split("/")
+            .map(encodeURIComponent)
+            .join("/");
+
+    return (
+        `https://raw.githubusercontent.com/` +
+        `${owner}/${repo}/HEAD/${encodedPath}`
+    );
+}
+
+
+/* -----------------------------
+   Encryption
+----------------------------- */
+
+async function deriveKey(password, salt) {
+
+    const passwordKey =
+        await crypto.subtle.importKey(
+            "raw",
+            encoder.encode(password),
+            "PBKDF2",
+            false,
+            ["deriveKey"]
+        );
+
+    return crypto.subtle.deriveKey(
+        {
+            name: "PBKDF2",
+            salt: salt,
+            iterations: PBKDF2_ITERATIONS,
+            hash: "SHA-256"
+        },
+        passwordKey,
+        {
+            name: "AES-GCM",
+            length: 256
+        },
+        false,
+        ["decrypt"]
+    );
+}
+
+
+async function decryptBP1(data, password) {
+
+    if (data.length < 49) {
+        throw new Error(
+            "Invalid BP1 file."
+        );
+    }
+
+    const magic =
+        decoder.decode(
+            data.slice(0, 4)
+        );
+
+    if (magic !== BP1_MAGIC) {
+        throw new Error(
+            "Invalid BP1 file."
+        );
+    }
+
+    if (data[4] !== BP1_VERSION) {
+        throw new Error(
+            "Unsupported BP1 version."
+        );
+    }
+
+    const salt =
+        data.slice(5, 21);
+
+    const iv =
+        data.slice(21, 33);
+
+    const ciphertext =
+        data.slice(33);
+
+    const key =
+        await deriveKey(
+            password,
+            salt
+        );
+
+    try {
+
+        const plaintext =
+            await crypto.subtle.decrypt(
+                {
+                    name: "AES-GCM",
+                    iv: iv
+                },
+                key,
+                ciphertext
+            );
+
+        return new Uint8Array(
+            plaintext
+        );
+
+    } catch {
+
+        throw new Error(
+            "Invalid BP1 key or corrupted package."
+        );
+    }
+}
+
+
+/* -----------------------------
+   Website reconstruction
+----------------------------- */
+
+function normalizePath(path) {
+
+    path = path.replaceAll("\\", "/");
+
+    while (path.startsWith("./")) {
+        path = path.slice(2);
+    }
+
+    return path;
+}
+
+
+function resolvePath(base, target) {
+
+    if (
+        target.startsWith("http://") ||
+        target.startsWith("https://") ||
+        target.startsWith("data:") ||
+        target.startsWith("blob:") ||
+        target.startsWith("#") ||
+        target.startsWith("mailto:")
+    ) {
+        return null;
+    }
+
+    const parts =
+        base.split("/");
+
+    parts.pop();
+
+    for (
+        const part of target.split("/")
+    ) {
+
+        if (!part || part === ".") {
+            continue;
+        }
+
+        if (part === "..") {
+            parts.pop();
+        } else {
+            parts.push(part);
+        }
+    }
+
+    return normalizePath(
+        parts.join("/")
+    );
+}
+
+
+/*
+ * Rewrite common HTML references
+ * from the original website paths
+ * to decrypted Blob URLs.
+ */
+function rewriteHTML(
+    html,
+    entryPath,
+    blobURLs
+) {
+
+    const attributes = [
+        "src",
+        "href",
+        "poster",
+        "data"
+    ];
+
+    for (const attribute of attributes) {
+
+        const regex =
+            new RegExp(
+                `(${attribute}\\s*=\\s*)(["'])(.*?)\\2`,
+                "gi"
+            );
+
+        html =
+            html.replace(
+                regex,
+                (full, prefix, quote, value) => {
+
+                    const resolved =
+                        resolvePath(
+                            entryPath,
+                            value
+                        );
+
+                    if (
+                        resolved &&
+                        blobURLs.has(resolved)
+                    ) {
+
+                        return (
+                            prefix +
+                            quote +
+                            blobURLs.get(resolved) +
+                            quote
+                        );
+                    }
+
+                    return full;
+                }
+            );
+    }
+
+    return html;
+}
+
+
+/* -----------------------------
+   Loader
+----------------------------- */
+
+async function loadBP1() {
+
+    const repository =
+        document
+            .getElementById("repository")
+            .value
+            .trim();
+
+    const password =
+        document
+            .getElementById("key")
+            .value;
+
+    const status =
+        document
+            .getElementById("status");
+
+    const button =
+        document
+            .getElementById("loadButton");
+
+    if (!repository) {
+        status.textContent =
+            "Enter a GitHub repository.";
+        return;
+    }
+
+    if (!password) {
+        status.textContent =
+            "Enter the BP1 key.";
+        return;
+    }
+
+    button.disabled = true;
+
+    try {
+
+        status.textContent =
+            "Searching repository...";
+
+        const files =
+            await getRepositoryFiles(
+                repository
+            );
+
+        const index =
+            files.find(
+                file =>
+                    file.type === "blob" &&
+                    file.path === "index.bp1"
+            );
+
+        if (!index) {
+            throw new Error(
+                "This repository does not contain index.bp1."
+            );
+        }
+
+
+        /* Download index */
+
+        status.textContent =
+            "Downloading index.bp1...";
+
+        const indexResponse =
+            await fetch(
+                rawURL(
+                    repository,
+                    "index.bp1"
+                )
+            );
+
+        if (!indexResponse.ok) {
+            throw new Error(
+                "Could not download index.bp1."
+            );
+        }
+
+        const encryptedIndex =
+            new Uint8Array(
+                await indexResponse.arrayBuffer()
+            );
+
+
+        /* Test key */
+
+        status.textContent =
+            "Verifying BP1 key...";
+
+        const decryptedIndex =
+            await decryptBP1(
+                encryptedIndex,
+                password
+            );
+
+
+        /* Read manifest */
+
+        let manifest;
+
+        try {
+
+            manifest =
+                JSON.parse(
+                    decoder.decode(
+                        decryptedIndex
+                    )
+                );
+
+        } catch {
+
+            throw new Error(
+                "Invalid BP1 manifest."
+            );
+        }
+
+        if (
+            manifest.bp1 !== 1 ||
+            !manifest.entry ||
+            !manifest.files
+        ) {
+
+            throw new Error(
+                "Invalid BP1 manifest."
+            );
+        }
+
+
+        /* Download resources */
+
+        const entries =
+            Object.entries(
+                manifest.files
+            );
+
+        const decryptedFiles =
+            new Map();
+
+        for (
+            let i = 0;
+            i < entries.length;
+            i++
+        ) {
+
+            const [
+                websitePath,
+                information
+            ] = entries[i];
+
+            status.textContent =
+                `Downloading ${i + 1}/${entries.length}\n` +
+                websitePath;
+
+            const response =
+                await fetch(
+                    rawURL(
+                        repository,
+                        "bp/" +
+                        information.object
+                    )
+                );
+
+            if (!response.ok) {
+                throw new Error(
+                    "Missing BP1 resource: " +
+                    information.object
+                );
+            }
+
+            const encrypted =
+                new Uint8Array(
+                    await response.arrayBuffer()
+                );
+
+            const decrypted =
+                await decryptBP1(
+                    encrypted,
+                    password
+                );
+
+            decryptedFiles.set(
+                normalizePath(websitePath),
+                {
+                    data: decrypted,
+                    type:
+                        information.type ||
+                        "application/octet-stream"
+                }
+            );
+        }
+
+
+        /* Create Blob URLs */
+
+        const blobURLs =
+            new Map();
+
+        for (
+            const [
+                path,
+                file
+            ] of decryptedFiles
+        ) {
+
+            const blob =
+                new Blob(
+                    [file.data],
+                    {
+                        type: file.type
+                    }
+                );
+
+            blobURLs.set(
+                path,
+                URL.createObjectURL(
+                    blob
+                )
+            );
+        }
+
+
+        /* Find entry */
+
+        const entryPath =
+            normalizePath(
+                manifest.entry
+            );
+
+        const entry =
+            decryptedFiles.get(
+                entryPath
+            );
+
+        if (!entry) {
+
+            throw new Error(
+                "The BP1 entry file does not exist."
+            );
+        }
+
+
+        /* Reconstruct HTML */
+
+        let html =
+            decoder.decode(
+                entry.data
+            );
+
+        html =
+            rewriteHTML(
+                html,
+                entryPath,
+                blobURLs
+            );
+
+
+        /* Launch */
+
+        const website =
+            document
+                .getElementById("website");
+
+        const websiteBlob =
+            new Blob(
+                [html],
+                {
+                    type: "text/html"
+                }
+            );
+
+        website.src =
+            URL.createObjectURL(
+                websiteBlob
+            );
+
+        website.style.display =
+            "block";
+
+        document
+            .getElementById("loader")
+            .style.display =
+            "none";
+
+    } catch (error) {
+
+        status.textContent =
+            error.message ||
+            "Invalid BP1 package.";
+
+        button.disabled = false;
+    }
+}
+
+
+document
+    .getElementById("loadButton")
+    .addEventListener(
+        "click",
+        loadBP1
+    );
+
+</script>
+
+</body>
+</html>

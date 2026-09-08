@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>BP1 Developer Tool</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: Arial, sans-serif;
+}
+
+.card {
+    width: min(720px, 92%);
+    padding: 30px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 14px;
+}
+
+h1 {
+    margin-top: 0;
+}
+
+.description {
+    color: #8b949e;
+}
+
+label {
+    display: block;
+    margin-top: 18px;
+    margin-bottom: 7px;
+    color: #8b949e;
+}
+
+input[type="text"],
+input[type="password"] {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #30363d;
+    background: #0d1117;
+    color: white;
+}
+
+.upload {
+    margin-top: 10px;
+    padding: 25px;
+    text-align: center;
+    background: #0d1117;
+    border: 1px dashed #484f58;
+    border-radius: 10px;
+}
+
+button {
+    width: 100%;
+    margin-top: 20px;
+    padding: 12px;
+    border: 0;
+    border-radius: 8px;
+    background: #238636;
+    color: white;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+button:disabled {
+    opacity: .5;
+}
+
+#status {
+    margin-top: 16px;
+    padding: 12px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    white-space: pre-wrap;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="card">
+
+<h1>BP1 Developer Tool</h1>
+
+<p class="description">
+Create an encrypted BP1 website package.
+</p>
+
+<label>
+Website Name
+</label>
+
+<input
+    id="websiteName"
+    type="text"
+    placeholder="My BP1 Website"
+>
+
+<label>
+Encryption Key
+</label>
+
+<input
+    id="key"
+    type="password"
+    placeholder="Choose an encryption key"
+>
+
+<label>
+Website Folder
+</label>
+
+<div class="upload">
+
+    <p>
+        Select the folder containing your website.
+    </p>
+
+    <input
+        id="website"
+        type="file"
+        webkitdirectory
+        multiple
+    >
+
+</div>
+
+<button id="build">
+    Build BP1 Package
+</button>
+
+<div id="status">
+Ready.
+</div>
+
+</div>
+
+
+<script>
+
+/* =========================================================
+   BP1 SETTINGS
+========================================================= */
+
+const BP1_MAGIC = "BP1E";
+const BP1_VERSION = 1;
+
+const PBKDF2_ITERATIONS = 250000;
+
+const encoder =
+    new TextEncoder();
+
+
+/* =========================================================
+   MIME TYPES
+========================================================= */
+
+const MIME_TYPES = {
+
+    html: "text/html",
+    htm: "text/html",
+
+    css: "text/css",
+
+    js: "text/javascript",
+    mjs: "text/javascript",
+
+    json: "application/json",
+    txt: "text/plain",
+    xml: "application/xml",
+
+    svg: "image/svg+xml",
+
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    webp: "image/webp",
+    ico: "image/x-icon",
+
+    mp4: "video/mp4",
+    webm: "video/webm",
+    mov: "video/quicktime",
+
+    mp3: "audio/mpeg",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+
+    woff: "font/woff",
+    woff2: "font/woff2",
+    ttf: "font/ttf",
+    otf: "font/otf",
+
+    wasm: "application/wasm",
+
+    pdf: "application/pdf"
+
+};
+
+
+function getMIMEType(path) {
+
+    const extension =
+        path
+            .split(".")
+            .pop()
+            .toLowerCase();
+
+    return (
+        MIME_TYPES[extension] ||
+        "application/octet-stream"
+    );
+}
+
+
+/* =========================================================
+   RANDOM BP1 FILENAME
+========================================================= */
+
+function randomFilename() {
+
+    const bytes =
+        new Uint8Array(16);
+
+    crypto.getRandomValues(
+        bytes
+    );
+
+    return (
+        [...bytes]
+            .map(
+                byte =>
+                    byte
+                        .toString(16)
+                        .padStart(2, "0")
+            )
+            .join("")
+            .toUpperCase()
+        +
+        ".bp1"
+    );
+}
+
+
+/* =========================================================
+   KEY DERIVATION
+========================================================= */
+
+async function deriveEncryptionKey(
+    password,
+    salt
+) {
+
+    const passwordKey =
+        await crypto.subtle.importKey(
+            "raw",
+            encoder.encode(password),
+            "PBKDF2",
+            false,
+            ["deriveKey"]
+        );
+
+    return crypto.subtle.deriveKey(
+
+        {
+            name: "PBKDF2",
+            salt: salt,
+            iterations:
+                PBKDF2_ITERATIONS,
+            hash: "SHA-256"
+        },
+
+        passwordKey,
+
+        {
+            name: "AES-GCM",
+            length: 256
+        },
+
+        false,
+
+        ["encrypt"]
+
+    );
+}
+
+
+/* =========================================================
+   ENCRYPT BP1 RESOURCE
+========================================================= */
+
+async function encryptBP1(
+    data,
+    password
+) {
+
+    const salt =
+        new Uint8Array(16);
+
+    crypto.getRandomValues(
+        salt
+    );
+
+    const iv =
+        new Uint8Array(12);
+
+    crypto.getRandomValues(
+        iv
+    );
+
+    const key =
+        await deriveEncryptionKey(
+            password,
+            salt
+        );
+
+    const ciphertext =
+        new Uint8Array(
+            await crypto.subtle.encrypt(
+
+                {
+                    name: "AES-GCM",
+                    iv: iv
+                },
+
+                key,
+
+                data
+
+            )
+        );
+
+
+    /*
+     * BP1 file:
+     *
+     * 4 bytes  = BP1E
+     * 1 byte   = version
+     * 16 bytes = salt
+     * 12 bytes = IV
+     * rest     = AES-GCM ciphertext + tag
+     */
+
+    const result =
+        new Uint8Array(
+            33 + ciphertext.length
+        );
+
+    result.set(
+        encoder.encode(BP1_MAGIC),
+        0
+    );
+
+    result[4] =
+        BP1_VERSION;
+
+    result.set(
+        salt,
+        5
+    );
+
+    result.set(
+        iv,
+        21
+    );
+
+    result.set(
+        ciphertext,
+        33
+    );
+
+    return result;
+}
+
+
+/* =========================================================
+   BYTE HELPERS
+========================================================= */
+
+function uint16(value) {
+
+    return new Uint8Array([
+        value & 255,
+        (value >> 8) & 255
+    ]);
+
+}
+
+
+function uint32(value) {
+
+    return new Uint8Array([
+        value & 255,
+        (value >> 8) & 255,
+        (value >> 16) & 255,
+        (value >> 24) & 255
+    ]);
+
+}
+
+
+function combine(...arrays) {
+
+    let length = 0;
+
+    for (const array of arrays) {
+        length += array.length;
+    }
+
+    const result =
+        new Uint8Array(length);
+
+    let position = 0;
+
+    for (const array of arrays) {
+
+        result.set(
+            array,
+            position
+        );
+
+        position +=
+            array.length;
+    }
+
+    return result;
+}
+
+
+/* =========================================================
+   CRC32
+========================================================= */
+
+function crc32(data) {
+
+    let crc = 0xffffffff;
+
+    for (const byte of data) {
+
+        crc ^= byte;
+
+        for (let i = 0; i < 8; i++) {
+
+            crc =
+                (crc >>> 1) ^
+                (
+                    (crc & 1)
+                    ? 0xedb88320
+                    : 0
+                );
+        }
+    }
+
+    return (
+        (~crc) >>> 0
+    );
+}
+
+
+/* =========================================================
+   SIMPLE ZIP CREATOR
+=========================================================
+
+   The ZIP uses "store" rather than compression.
+   The BP1 files are already encrypted and generally
+   shouldn't be expected to compress well anyway.
+========================================================= */
+
+function createZIP(files) {
+
+    const localFiles = [];
+    const centralDirectory = [];
+
+    let offset = 0;
+
+
+    for (const file of files) {
+
+        const name =
+            encoder.encode(
+                file.name
+            );
+
+        const data =
+            file.data;
+
+        const checksum =
+            crc32(data);
+
+
+        /* Local file header */
+
+        const localHeader =
+            combine(
+
+                new Uint8Array([
+                    0x50, 0x4b,
+                    0x03, 0x04
+                ]),
+
+                uint16(20),
+
+                uint16(0),
+
+                uint16(0),
+
+                uint16(0),
+
+                uint16(0),
+
+                uint32(checksum),
+
+                uint32(data.length),
+
+                uint32(data.length),
+
+                uint16(name.length),
+
+                uint16(0),
+
+                name,
+
+                data
+
+            );
+
+
+        localFiles.push(
+            localHeader
+        );
+
+
+        /* Central directory header */
+
+        const centralHeader =
+            combine(
+
+                new Uint8Array([
+                    0x50, 0x4b,
+                    0x01, 0x02
+                ]),
+
+                uint16(20),
+
+                uint16(20),
+
+                uint16(0),
+
+                uint16(0),
+
+                uint16(0),
+
+                uint16(0),
+
+                uint32(checksum),
+
+                uint32(data.length),
+
+                uint32(data.length),
+
+                uint16(name.length),
+
+                uint16(0),
+
+                uint16(0),
+
+                uint16(0),
+
+                uint16(0),
+
+                uint32(0),
+
+                uint32(offset),
+
+                name
+
+            );
+
+
+        centralDirectory.push(
+            centralHeader
+        );
+
+
+        offset +=
+            localHeader.length;
+    }
+
+
+    const localData =
+        combine(
+            ...localFiles
+        );
+
+    const directory =
+        combine(
+            ...centralDirectory
+        );
+
+
+    /* End of central directory */
+
+    const end =
+        combine(
+
+            new Uint8Array([
+                0x50, 0x4b,
+                0x05, 0x06
+            ]),
+
+            uint16(0),
+
+            uint16(0),
+
+            uint16(files.length),
+
+            uint16(files.length),
+
+            uint32(directory.length),
+
+            uint32(localData.length),
+
+            uint16(0)
+
+        );
+
+
+    return combine(
+        localData,
+        directory,
+        end
+    );
+}
+
+
+/* =========================================================
+   BUILD BP1
+========================================================= */
+
+async function buildBP1() {
+
+    const websiteName =
+        document
+            .getElementById("websiteName")
+            .value
+            .trim() ||
+        "BP1 Website";
+
+    const password =
+        document
+            .getElementById("key")
+            .value;
+
+    const input =
+        document
+            .getElementById("website");
+
+    const status =
+        document
+            .getElementById("status");
+
+    const button =
+        document
+            .getElementById("build");
+
+
+    if (!password) {
+
+        status.textContent =
+            "Enter an encryption key.";
+
+        return;
+    }
+
+
+    if (!input.files.length) {
+
+        status.textContent =
+            "Select a website folder.";
+
+        return;
+    }
+
+
+    button.disabled = true;
+
+
+    try {
+
+        const files =
+            [...input.files];
+
+
+        /*
+         * webkitRelativePath looks like:
+         *
+         * MyWebsite/index.html
+         * MyWebsite/css/style.css
+         *
+         * Remove the top-level directory.
+         */
+
+        const firstPath =
+            files[0]
+                .webkitRelativePath
+                .split("/");
+
+        const rootDirectory =
+            firstPath[0];
+
+
+        const manifest = {
+
+            bp1: 1,
+
+            name:
+                websiteName,
+
+            version:
+                1,
+
+            entry:
+                "index.html",
+
+            algorithm:
+                "AES-256-GCM",
+
+            kdf:
+                "PBKDF2-SHA-256",
+
+            iterations:
+                PBKDF2_ITERATIONS,
+
+            files: {}
+
+        };
+
+
+        const outputFiles = [];
+
+        let foundIndex =
+            false;
+
+
+        for (
+            let i = 0;
+            i < files.length;
+            i++
+        ) {
+
+            const file =
+                files[i];
+
+
+            let path =
+                file.webkitRelativePath;
+
+
+            if (
+                path.startsWith(
+                    rootDirectory + "/"
+                )
+            ) {
+
+                path =
+                    path.slice(
+                        rootDirectory.length + 1
+                    );
+            }
+
+
+            path =
+                path.replaceAll(
+                    "\\",
+                    "/"
+                );
+
+
+            if (!path) {
+                continue;
+            }
+
+
+            /*
+             * Prevent accidentally including
+             * an old BP1 package.
+             */
+
+            if (
+                path === "index.bp1" ||
+                path.startsWith("bp/")
+            ) {
+                continue;
+            }
+
+
+            if (
+                path === "index.html"
+            ) {
+                foundIndex = true;
+            }
+
+
+            status.textContent =
+                `Encrypting ${i + 1}/${files.length}\n` +
+                path;
+
+
+            const data =
+                new Uint8Array(
+                    await file.arrayBuffer()
+                );
+
+
+            const objectName =
+                randomFilename();
+
+
+            const encrypted =
+                await encryptBP1(
+                    data,
+                    password
+                );
+
+
+            manifest.files[path] = {
+
+                object:
+                    objectName,
+
+                type:
+                    file.type ||
+                    getMIMEType(path),
+
+                size:
+                    data.length
+
+            };
+
+
+            outputFiles.push({
+
+                name:
+                    "bp/" +
+                    objectName,
+
+                data:
+                    encrypted
+
+            });
+
+        }
+
+
+        if (!foundIndex) {
+
+            throw new Error(
+                "The website must contain index.html."
+            );
+        }
+
+
+        /*
+         * Encrypt manifest after all
+         * file mappings have been generated.
+         */
+
+        status.textContent =
+            "Encrypting index.bp1...";
+
+
+        const manifestBytes =
+            encoder.encode(
+                JSON.stringify(
+                    manifest,
+                    null,
+                    2
+                )
+            );
+
+
+        const encryptedManifest =
+            await encryptBP1(
+                manifestBytes,
+                password
+            );
+
+
+        outputFiles.unshift({
+
+            name:
+                "index.bp1",
+
+            data:
+                encryptedManifest
+
+        });
+
+
+        /*
+         * Create ZIP.
+         */
+
+        status.textContent =
+            "Creating BP1 package...";
+
+
+        const zipData =
+            createZIP(
+                outputFiles
+            );
+
+
+        const blob =
+            new Blob(
+                [zipData],
+                {
+                    type:
+                        "application/zip"
+                }
+            );
+
+
+        const url =
+            URL.createObjectURL(
+                blob
+            );
+
+
+        const link =
+            document.createElement(
+                "a"
+            );
+
+        link.href =
+            url;
+
+        link.download =
+            (
+                websiteName
+                    .replace(
+                        /[^a-z0-9_-]+/gi,
+                        "-"
+                    )
+                    .replace(
+                        /^-+|-+$/g,
+                        ""
+                    ) ||
+                "BP1-Website"
+            ) +
+            ".bp1.zip";
+
+
+        link.click();
+
+
+        setTimeout(
+            () =>
+                URL.revokeObjectURL(url),
+            10000
+        );
+
+
+        status.textContent =
+            "BP1 package created successfully.\n\n" +
+            `Website: ${websiteName}\n` +
+            `Resources: ${outputFiles.length - 1}\n\n` +
+            "Upload the contents of the ZIP to a public GitHub repository.";
+
+    } catch (error) {
+
+        status.textContent =
+            error.message ||
+            "Failed to build BP1 package.";
+
+    } finally {
+
+        button.disabled = false;
+
+    }
+
+}
+
+
+document
+    .getElementById("build")
+    .addEventListener(
+        "click",
+        buildBP1
+    );
+
+</script>
+
+</body>
+</html>

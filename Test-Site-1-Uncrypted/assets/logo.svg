@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+
+    <rect width="200" height="200" rx="40" fill="#181b21"></rect>
+
+    <path d="M55 45
+           L145 45
+           L120 100
+           L145 155
+           L55 155
+           L80 100
+           Z" fill="white"></path>
+
+    <text x="100" y="112" text-anchor="middle" font-family="Arial" font-size="32" font-weight="bold" fill="#181b21">
+        BP1
+    </text>
+</svg>
