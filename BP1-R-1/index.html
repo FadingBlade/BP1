@@ -52,9 +52,9 @@ const decoder = new TextDecoder();
 const $ = id => document.getElementById(id);
 
 function parseRepository(url) {
-  const match = url.trim().replace(/\/+$/, "").match(/^https?:\/\/github\\.com\\/([^/]+)\\/([^/#?]+)/i);
+  const match = url.trim().replace(/\/+$/, "").match(/^https?:\/\/github\.com\/([^/]+)\/([^/#?]+)/i);
   if (!match) throw new Error("Invalid GitHub repository URL.");
-  return { owner: match[1], repo: match[2].replace(/\\.git$/i, "") };
+  return { owner: match[1], repo: match[2].replace(/\.git$/i, "") };
 }
 
 async function getRepositoryFiles(repository) {
@@ -111,7 +111,7 @@ async function decryptBP1(data, password) {
 }
 
 function normalizePath(path) {
-  path = String(path || "").replaceAll("\\\\", "/");
+  path = String(path || "").replaceAll("\\", "/");
   while (path.startsWith("./")) path = path.slice(2);
   path = path.replace(/^\/+/, "");
   return path;
