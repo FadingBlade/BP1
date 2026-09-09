@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BP1 Loader</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0d1117;color:#e6edf3;font-family:Arial,sans-serif}
+#loader{width:min(680px,92%);padding:30px;background:#161b22;border:1px solid #30363d;border-radius:14px}
+h1{margin-top:0}.description{color:#8b949e;line-height:1.5}
+label{display:block;margin-top:18px;margin-bottom:7px;color:#8b949e;font-size:14px}
+input{width:100%;padding:12px;border-radius:8px;border:1px solid #30363d;background:#0d1117;color:white;font-size:15px}
+button{width:100%;margin-top:20px;padding:12px;border:0;border-radius:8px;background:#238636;color:white;font-weight:bold;cursor:pointer}
+button:disabled{opacity:.5}
+#status{margin-top:16px;padding:12px;background:#0d1117;border:1px solid #30363d;border-radius:8px;white-space:pre-wrap;line-height:1.4}
+#website{display:none;position:fixed;inset:0;width:100%;height:100%;border:0;background:white}
+.small{margin-top:10px;font-size:12px;color:#8b949e}
+</style>
+</head>
+<body>
+<div id="loader">
+  <h1>BP1 Loader</h1>
+  <p class="description">Load an encrypted BP1 website from a public GitHub repository.</p>
+
+  <label for="repository">GitHub Repository</label>
+  <input id="repository" placeholder="https://github.com/user/repository" autocomplete="off">
+
+  <label for="key">BP1 Key</label>
+  <input id="key" type="password" placeholder="Encryption key" autocomplete="off">
+
+  <button id="loadButton">Load Website</button>
+
+  <div id="status">Ready.</div>
+  <div class="small">Hosted mode requires HTTPS. The BP1 site is reconstructed locally in this browser.</div>
+</div>
+
+<iframe id="website"
+  sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads"
+  referrerpolicy="no-referrer"></iframe>
+
+<script>
+"use strict";
+
+const BP1_MAGIC = "BP1E";
+const BP1_VERSION = 1;
+const PBKDF2_ITERATIONS = 250000;
+const CACHE_PREFIX = "bp1-package-v1-";
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+const $ = id => document.getElementById(id);
+
+function parseRepository(url) {
+  const match = url.trim().replace(/\/+$/, "").match(/^https?:\/\/github\\.com\\/([^/]+)\\/([^/#?]+)/i);
+  if (!match) throw new Error("Invalid GitHub repository URL.");
+  return { owner: match[1], repo: match[2].replace(/\\.git$/i, "") };
+}
+
+async function getRepositoryFiles(repository) {
+  const { owner, repo } = parseRepository(repository);
+  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/HEAD?recursive=1`;
+  const response = await fetch(url, { headers: { "Accept": "application/vnd.github+json" } });
+  if (!response.ok) {
+    if (response.status === 404) throw new Error("GitHub repository not found or not public.");
+    throw new Error(`GitHub repository request failed (${response.status}).`);
+  }
+  const data = await response.json();
+  if (data.truncated) throw new Error("GitHub returned a truncated repository tree. The repository is too large for this BP1 loader.");
+  return data.tree || [];
+}
+
+function rawURL(repository, path) {
+  const { owner, repo } = parseRepository(repository);
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  return `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${encodedPath}`;
+}
+
+async function deriveKey(password, salt) {
+  const passwordKey = await crypto.subtle.importKey(
+    "raw", encoder.encode(password), "PBKDF2", false, ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    passwordKey,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["decrypt"]
+  );
+}
+
+async function decryptBP1(data, password) {
+  if (data.length < 49) throw new Error("Invalid BP1 file.");
+
+  const magic = decoder.decode(data.slice(0, 4));
+  if (magic !== BP1_MAGIC) throw new Error("Invalid BP1 file.");
+  if (data[4] !== BP1_VERSION) throw new Error("Unsupported BP1 version.");
+
+  const salt = data.slice(5, 21);
+  const iv = data.slice(21, 33);
+  const ciphertext = data.slice(33);
+
+  const key = await deriveKey(password, salt);
+
+  try {
+    const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
+    return new Uint8Array(plaintext);
+  } catch {
+    throw new Error("Invalid BP1 key or corrupted package.");
+  }
+}
+
+function normalizePath(path) {
+  path = String(path || "").replaceAll("\\\\", "/");
+  while (path.startsWith("./")) path = path.slice(2);
+  path = path.replace(/^\/+/, "");
+  return path;
+}
+
+function validateManifest(manifest) {
+  if (!manifest || manifest.bp1 !== 1 || typeof manifest.entry !== "string" || !manifest.files || typeof manifest.files !== "object") {
+    throw new Error("Invalid BP1 manifest.");
+  }
+
+  const entry = normalizePath(manifest.entry);
+  if (!manifest.files[entry]) throw new Error("The BP1 entry file does not exist.");
+
+  for (const [path, info] of Object.entries(manifest.files)) {
+    if (!path || !info || typeof info.object !== "string") {
+      throw new Error("Invalid BP1 file entry.");
+    }
+    if (path.includes("..") || path.startsWith("/")) {
+      throw new Error(`Invalid BP1 path: ${path}`);
+    }
+    if (info.object.includes("/") || info.object.includes("..")) {
+      throw new Error(`Invalid BP1 object name: ${info.object}`);
+    }
+  }
+}
+
+async function registerRuntime() {
+  if (!("serviceWorker" in navigator)) {
+    throw new Error("This browser does not support Service Workers.");
+  }
+  if (!window.isSecureContext) {
+    throw new Error("BP1 hosted mode requires HTTPS. Use a deployed HTTPS URL or localhost for development.");
+  }
+
+  const swURL = new URL("bp1-sw.js", document.baseURI);
+  const registration = await navigator.serviceWorker.register(swURL, { scope: new URL("./", document.baseURI).pathname });
+  await navigator.serviceWorker.ready;
+  return registration;
+}
+
+async function clearOldPackageCaches() {
+  const keys = await caches.keys();
+  await Promise.all(keys.filter(k => k.startsWith(CACHE_PREFIX)).map(k => caches.delete(k)));
+}
+
+function packageId() {
+  if (crypto.randomUUID) return crypto.randomUUID().replaceAll("-", "");
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function putPackageInCache(id, repository, manifest, decryptedFiles) {
+  const cacheName = CACHE_PREFIX + id;
+  const cache = await caches.open(cacheName);
+  const base = new URL(`__bp1__/${id}/`, document.baseURI);
+
+  for (const [path, file] of decryptedFiles) {
+    const url = new URL(path, base);
+    const headers = new Headers({
+      "Content-Type": file.type || "application/octet-stream",
+      "Cache-Control": "no-store",
+      "X-BP1-Package": id
+    });
+
+    await cache.put(url, new Response(file.data, {
+      status: 200,
+      headers
+    }));
+  }
+
+  const metadata = {
+    id,
+    repository,
+    name: manifest.name || "BP1 Website",
+    entry: normalizePath(manifest.entry),
+    cacheName
+  };
+
+  sessionStorage.setItem("bp1-active-package", JSON.stringify(metadata));
+  return metadata;
+}
+
+async function loadBP1() {
+  const repository = $("repository").value.trim();
+  const password = $("key").value;
+  const status = $("status");
+  const button = $("loadButton");
+
+  if (!repository) {
+    status.textContent = "Enter a GitHub repository.";
+    return;
+  }
+  if (!password) {
+    status.textContent = "Enter the BP1 key.";
+    return;
+  }
+
+  button.disabled = true;
+
+  try {
+    status.textContent = "Preparing BP1 runtime...";
+    await registerRuntime();
+    await clearOldPackageCaches();
+
+    status.textContent = "Searching repository...";
+    const files = await getRepositoryFiles(repository);
+
+    const index = files.find(file => file.type === "blob" && file.path === "index.bp1");
+    if (!index) throw new Error("This repository does not contain index.bp1.");
+
+    status.textContent = "Downloading index.bp1...";
+    const indexResponse = await fetch(rawURL(repository, "index.bp1"));
+    if (!indexResponse.ok) throw new Error("Could not download index.bp1.");
+
+    const encryptedIndex = new Uint8Array(await indexResponse.arrayBuffer());
+
+    status.textContent = "Verifying BP1 key...";
+    const decryptedIndex = await decryptBP1(encryptedIndex, password);
+
+    let manifest;
+    try {
+      manifest = JSON.parse(decoder.decode(decryptedIndex));
+    } catch {
+      throw new Error("Invalid BP1 manifest.");
+    }
+
+    validateManifest(manifest);
+
+    const entries = Object.entries(manifest.files);
+    const decryptedFiles = new Map();
+
+    for (let i = 0; i < entries.length; i++) {
+      const [websitePath, information] = entries[i];
+      const path = normalizePath(websitePath);
+
+      status.textContent = `Downloading ${i + 1}/${entries.length}\\n${path}`;
+
+      const response = await fetch(rawURL(repository, "bp/" + information.object));
+      if (!response.ok) throw new Error(`Missing BP1 resource: ${information.object}`);
+
+      const encrypted = new Uint8Array(await response.arrayBuffer());
+      const decrypted = await decryptBP1(encrypted, password);
+
+      decryptedFiles.set(path, {
+        data: decrypted,
+        type: information.type || "application/octet-stream"
+      });
+    }
+
+    status.textContent = "Building BP1 virtual filesystem...";
+    const id = packageId();
+    const metadata = await putPackageInCache(id, repository, manifest, decryptedFiles);
+
+    status.textContent = `Launching ${metadata.name}...`;
+
+    const website = $("website");
+    website.src = new URL(`__bp1__/${id}/${metadata.entry}`, document.baseURI).href;
+    website.style.display = "block";
+    $("loader").style.display = "none";
+
+  } catch (error) {
+    console.error(error);
+    status.textContent = error?.message || "Invalid BP1 package.";
+    button.disabled = false;
+  }
+}
+
+$("loadButton").addEventListener("click", loadBP1);
+$("key").addEventListener("keydown", event => {
+  if (event.key === "Enter") loadBP1();
+});
+$("repository").addEventListener("keydown", event => {
+  if (event.key === "Enter") $("key").focus();
+});
+</script>
+</body>
+</html>
