@@ -1,41 +1,71 @@
-BP1 FULL END-TO-END TEST
-========================
+BP1 v2 TEST BUNDLE
+==================
 
-TEST KEY
-  BP1-TEST-2026
+Key for every included test package:
+BP1-TEST-2026
 
-A. FASTEST RUNTIME TEST
-1. Create a NEW public GitHub repository.
-2. Extract BP1-Test-Package-READY.zip.
-3. Upload index.bp1 and the bp/ folder to the repository root.
-4. Deploy the contents of runtime/ to Cloudflare Pages (index.html + bp1-sw.js at the same directory level).
-5. Open the Cloudflare Pages HTTPS URL.
-6. Enter the public GitHub repository URL.
-7. Enter key: BP1-TEST-2026
-8. Click Load Website.
+WHAT CHANGED IN V2
+------------------
+V1: every encrypted object runs PBKDF2-SHA-256 (250,000 iterations).
+V2: PBKDF2-SHA-256 runs ONCE per package to create a 256-bit master key.
+    HKDF-SHA-256 then derives a unique AES-256-GCM key per object.
 
-PASS CONDITIONS
-- Main page renders with dark styling.
-- BP1 SVG logo appears.
-- JavaScript status changes to Loaded.
-- Clicking Test JavaScript changes the result text.
-- JSON status changes to Loaded and JSON is displayed.
-- Open second page works and remains styled.
-- Back to test page works.
+V2 encryption chain:
+Password -> PBKDF2(250,000, package salt) -> master key
+Master key -> HKDF(package salt, object context) -> per-object AES-256 key
+Per-object key -> AES-256-GCM
 
-B. PACKAGER TEST
-1. Open dev-tool/index.html in a modern browser.
-2. Select the test-site/ folder.
-3. Keep key BP1-TEST-2026 (or choose another key).
-4. Click Build BP1 Package.
-5. Extract the generated ZIP and upload it to another public GitHub repo.
-6. Load that repo through the hosted runtime with the same key.
-7. Repeat the PASS CONDITIONS above.
+Each v2 .bp1 object keeps the same 33-byte pre-ciphertext header shape:
+bytes 0-3   ASCII BP1E
+byte 4      version = 2
+bytes 5-20  package master salt (same for every object in one package)
+bytes 21-32 random AES-GCM IV
+byte 33+    ciphertext + authentication tag
 
-FAILURE TESTS
-- Wrong key should fail before launching the site.
-- Repository without index.bp1 should report that index.bp1 is missing.
-- Delete one encrypted object from bp/ and loading should report a missing BP1 resource.
+HKDF context:
+index.bp1 uses: BP1v2:index.bp1
+resource uses:  BP1v2:<random-object-name>
 
-IMPORTANT
-Use a dedicated Cloudflare Pages project/origin for the BP1 runtime when testing untrusted BP1 packages.
+AES-GCM additional authenticated data:
+index.bp1 uses: BP1|2|index.bp1
+resource uses:  BP1|2|<random-object-name>
+
+FILES
+-----
+runtime/
+  index.html  - dual-stack loader; supports BP1 v1 and v2
+  bp1-sw.js   - virtual filesystem, Range/HEAD support
+
+dev-tool/
+  index.html  - BP1 v2 browser packager
+
+BP1-v2-Compatibility-Package-READY.zip
+  Full existing compatibility test repackaged as BP1 v2.
+
+BP1-Speed-Test-v1-READY.zip
+BP1-Speed-Test-v2-READY.zip
+  Same 121-file site packaged in each format for direct timing comparison.
+
+BP1-Speed-Test-Source.zip
+  Unencrypted source of the speed test.
+
+HOW TO TEST
+-----------
+1. Deploy runtime/index.html and runtime/bp1-sw.js to Cloudflare Pages.
+2. Extract BP1-v2-Compatibility-Package-READY.zip into a PUBLIC GitHub repo.
+3. Load that repo using key BP1-TEST-2026.
+4. Confirm the compatibility results match the prior v1 test.
+5. For speed comparison, put the v1 and v2 speed packages into two separate public GitHub repos.
+6. Load each with the same runtime and key. The loader status reports total load time; v2 also reports the single PBKDF2 time.
+
+BACKWARD COMPATIBILITY
+----------------------
+The new loader detects the encrypted index header version before decrypting it.
+- version 1 -> original per-file PBKDF2 path
+- version 2 -> one PBKDF2 master derivation + per-file HKDF path
+Existing v1 packages do not need to be rebuilt.
+
+KNOWN ARCHITECTURAL LIMITATION
+------------------------------
+A BP1-loaded site still cannot reliably register its own nested Service Worker.
+Normal browser CORS rules also still apply to external network requests.
