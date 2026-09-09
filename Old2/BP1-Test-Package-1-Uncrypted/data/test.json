@@ -1,1 +1,0 @@
-{"protocol":"BP1","test":"end-to-end","version":1,"message":"If you can read this, JSON loading works.","numbers":[1,2,3,4,5],"nested":{"working":true,"purpose":"Test relative resource loading"}}

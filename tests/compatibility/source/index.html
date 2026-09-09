@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BP1 Compatibility Test</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <div>
+      <h1>BP1 Compatibility Test</h1>
+      <p>Automated browser/runtime compatibility matrix for BP1.</p>
+    </div>
+    <div class="summary">
+      <span id="passCount">0 PASS</span>
+      <span id="partialCount">0 PARTIAL</span>
+      <span id="failCount">0 FAIL</span>
+      <span id="pendingCount">0 PENDING</span>
+    </div>
+  </header>
+
+  <section class="controls">
+    <button id="runAll">Run all tests</button>
+    <button id="copyResults">Copy results</button>
+    <button id="reset">Reset</button>
+  </section>
+
+  <section class="legend">
+    <span class="pass">PASS</span>
+    <span class="partial">PARTIAL</span>
+    <span class="fail">FAIL</span>
+    <span class="pending">PENDING</span>
+  </section>
+
+  <div id="cssSentinel">CSS sentinel</div>
+  <img id="svgSentinel" src="assets/logo.svg" alt="BP1 test logo">
+
+  <section id="results"></section>
+
+  <section class="manual">
+    <h2>Manual / browser-permission tests</h2>
+    <p>These cannot always be fully automated because browsers require user interaction or external server behavior.</p>
+    <div class="manual-grid">
+      <button id="manualAudio">Play test audio</button>
+      <button id="manualVideo">Play test video</button>
+      <a id="downloadLink" href="downloads/sample.bin" download="bp1-sample.bin">Download test file</a>
+    </div>
+    <div id="manualStatus">No manual test run yet.</div>
+  </section>
+
+  <section class="environment">
+    <h2>Environment</h2>
+    <pre id="environment"></pre>
+  </section>
+</main>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

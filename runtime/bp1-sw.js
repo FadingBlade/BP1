@@ -1,5 +1,5 @@
-/* BP1 Hosted Runtime Service Worker v2.0-test
- * Supports BP1 v1 and v2 packages cached by the loader.
+/* BP1 Hosted Runtime Service Worker
+ * Release build 1.0.0. Supports current and legacy BP1 package profiles.
  */
 const CACHE_PREFIX = "bp1-package-";
 const LEGACY_CACHE_PREFIX = "bp1-package-v1-";

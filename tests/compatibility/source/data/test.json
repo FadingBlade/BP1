@@ -1,0 +1,14 @@
+{
+  "protocol": "BP1",
+  "message": "JSON fetch works",
+  "nested": {
+    "ok": true
+  },
+  "numbers": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ]
+}

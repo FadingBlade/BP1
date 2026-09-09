@@ -1,0 +1,20 @@
+{
+  "name": "Blade Protocol 1",
+  "shortName": "BP1",
+  "releaseVersion": "1.0.0",
+  "runtimeBuild": "1.0.0",
+  "packagerBuild": "1.0.0",
+  "currentInternalWireProfile": 2,
+  "supportedInternalWireProfiles": [1, 2],
+  "packageAlgorithm": "AES-256-GCM",
+  "passwordKdf": "PBKDF2-SHA-256",
+  "passwordKdfIterations": 250000,
+  "perObjectKdf": "HKDF-SHA-256",
+  "integrity": "SHA-256",
+  "runtimeHosting": "static HTTPS",
+  "packageSource": "public GitHub repository",
+  "knownLimitations": [
+    "Packaged sites cannot reliably register their own Service Worker through the static BP1 virtual filesystem.",
+    "External network requests remain subject to normal browser CORS and security policy."
+  ]
+}
