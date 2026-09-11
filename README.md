@@ -14,6 +14,40 @@ Release version: **1.0.0**.
 - `RELEASE.json` — machine-readable release metadata.
 - `SHA256SUMS.txt` — SHA-256 checksums for release files.
 
+## Links
+
+- https://bp1-rt-1.global.ssl.fastly.net/
+- https://bp1-rt-2.global.ssl.fastly.net/
+
+- https://bp1-rt-1.edgeone.dev/
+- https://bp1-rt-2.edgeone.dev/
+
+- https://bp1-rt-1.fadingblade.win/
+- https://bp1-rt-2.fadingblade.win/
+
+- https://main.d34rkx2aop5fk4.amplifyapp.com/
+- https://main.d3et48e6s4alwl.amplifyapp.com/
+
+- https://bp1-rt-1.up.railway.app/
+- https://bp1-rt-2.up.railway.app/
+
+- https://bp1-rt-1.pages.dev/
+- https://bp1-rt-2.pages.dev/
+
+- https://bp1-rt-1.vercel.app/
+- https://bp1-rt-2.vercel.app/
+
+- https://bp1-rt-1.onrender.com/
+- https://bp1-rt-2.onrender.com/
+
+- https://bp1-rt-1.netlify.app/
+- https://bp1-rt-2.netlify.app/
+
+- https://bp1-rt-1.neocities.org/
+- https://bp1-rt-1.nekoweb.org/
+
+
+
 ## Fast start
 
 1. Deploy `runtime/index.html` and `runtime/bp1-sw.js` together at the root of an HTTPS site.
