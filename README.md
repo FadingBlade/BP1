@@ -43,7 +43,7 @@ Release version: **1.0.0**.
 - https://bp1-rt-1.netlify.app/
 - https://bp1-rt-2.netlify.app/
 
-- https://bp1-rt-1.neocities.org/
+- https://bp1-rt-1.neocities.org/ - Unreliable or will not work
 - https://bp1-rt-1.nekoweb.org/
 
 
